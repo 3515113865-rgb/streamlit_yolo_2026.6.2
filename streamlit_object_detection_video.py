@@ -57,19 +57,17 @@ if mode == "Image":
             st.subheader("Output")
             st.image(res_img)
 
-# ==================== 【最终稳定版：视频处理 + 生成MP4 + 播放】 ====================
+# ==================== 视频：H264编码修复版 ====================
 else:
     uploaded_video = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
     conf = st.slider("Confidence", 0.1, 0.9, 0.25)
 
     if uploaded_video is not None:
-        # 保存临时文件
         temp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
         temp_in.write(uploaded_video.read())
         temp_in.close()
 
         temp_out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-
         st.success("上传成功 → 点击开始处理")
 
         if st.button("Start Video Detection"):
@@ -78,7 +76,8 @@ else:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = int(cap.get(cv2.CAP_PROP_FPS))
 
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            # 关键改动：改用H.264编码 avc1，浏览器原生支持
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')
             out = cv2.VideoWriter(temp_out.name, fourcc, fps, (width, height))
 
             progress = st.progress(0)
@@ -90,11 +89,8 @@ else:
                     ret, frame = cap.read()
                     if not ret:
                         break
-
-                    # YOLO 检测
-                    res = model.predict(frame, conf=conf, verbose=False)[0]
+                    res = model.predict(frame, conf=conf, verbose=False, imgsz=480)[0]
                     frame = res.plot()
-
                     out.write(frame)
                     current += 1
                     progress.progress(min(current / frame_count, 1.0))
@@ -103,8 +99,7 @@ else:
             out.release()
 
             st.success("✅ 视频处理完成！")
-
-            # 直接播放处理好的视频（必动、必流畅）
+            # st.video原生支持H264
             st.video(temp_out.name)
 
             os.unlink(temp_in.name)
