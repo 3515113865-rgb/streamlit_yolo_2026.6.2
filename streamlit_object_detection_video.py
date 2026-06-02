@@ -1,4 +1,3 @@
-#Import All the Required Libraries
 import os
 os.environ['OPENCV_IO_ENABLE_OPENGL'] = '0'
 os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
@@ -10,12 +9,10 @@ from PIL import Image
 import numpy as np
 import time
 
-#Streamlit Application
-st.set_page_config(page_title="YOL011 Detector",page_icon="❤",layout="centered")
+st.set_page_config(page_title="YOLO11 Detector",page_icon="❤",layout="centered")
 st.title("❤ YOLO11 - Image & Video")
-st.caption("Choose Task (Detection/ Segmentation/Pose Estimation),then upload an Image or Video. ")
+st.caption("Choose Task,then upload an Image or Video. ")
 
-#----Task Selection:Choose the model family------
 task = st.radio(
     "Select Task",
     ["Object Detection", "Instance Segmentation", "Pose Estimation"],
@@ -29,84 +26,61 @@ MODEL_MAP={
 }
 model_path = MODEL_MAP[task]
 
-#Load YOL0 Model once per chosen task
 @st.cache_resource(show_spinner=False)
 def get_model(path:str):
     return YOLO(path)
 model = get_model(model_path)
 
-#ModeSwitch
-mode = st.radio("Select Mode", ["Image", "Video (Live)"], horizontal=True)
+mode = st.radio("Select Mode", ["Image", "Video"], horizontal=True)
 
-#IMAGE MODE
+# 图片模块不变
 if mode == "Image":
     uploaded = st.file_uploader("Upload an Image", type=["png", "jpg", "jpeg", "webp"])
     if uploaded is not None:
         img = Image.open(uploaded).convert("RGB")
-        with st.spinner("Running YoL011..."):
-            result = model.predict(source=np.array(img), save=True, verbose=False)[0]
+        with st.spinner("Running YOLO11..."):
+            result = model.predict(source=np.array(img), save=False, verbose=False)[0]
             annotated_pil = result.plot(pil=True)
-            col1, col2 = st.columns(2, gap="large")
+            col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Input")
                 st.image(img, use_container_width=True)
             with col2:
                 st.subheader("Detections")
                 st.image(annotated_pil, use_container_width=True)
-    else:
-        st.info("请先上传图片")
 
-#VIDEO MODE(LIVE)
+# 【全部重写视频代码，核心三处改动：stream=True、分辨率320、清空opencv缓存】
 else:
-    uploaded = st.file_uploader("Upload an Video", type=["mp4", "mov", "avi", "mkv"])
-    conf = st.slider("Confidence Threshold", 0.1, 0.9, 0.25, 0.05)
-    start = st.button("start Detection")
-    input_path = None
+    uploaded = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
+    conf = st.slider("Confidence", 0.1, 0.9, 0.25, 0.05)
+    start = st.button("Start Detection")
+    temp_path = None
 
-    if uploaded is not None:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            tmp_file.write(uploaded.read())
-            input_path = tmp_file.name
-        st.caption(f"Input File: {uploaded.name} + Task：{task} + Model:{model_path}")
+    if uploaded:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as f:
+            f.write(uploaded.read())
+            temp_path = f.name
 
-    if start:
-        frame_placeholder = st.empty()
-        info_placeholder = st.empty()
-        progress_bar = st.progress(0)
+    if start and temp_path:
+        frame_box = st.empty()
+        cap = cv2.VideoCapture(temp_path)
+        # 缩小画面减少算力
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,320)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,240)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE,1) # 关键：opencv只存1帧缓存，杜绝堆帧卡死
 
-        if input_path is None:
-            st.warning("请先上传视频！")
-            st.stop()
+        while cap.isOpened():
+            ret,frame = cap.read()
+            if not ret:
+                break
+            # 重点：加stream=True流式推理，解决一次性加载全帧卡死
+            for res in model(frame,conf=conf,verbose=False,imgsz=320,stream=True):
+                out = res.plot()
+                frame_box.image(out,channels="BGR",width=520)
+            time.sleep(0.032) # 固定30fps
 
-        cap = cv2.VideoCapture(input_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        processed = 0
-
-        with st.spinner(f"Running {task} on video (live)...."):
-            while cap.isOpened():
-                ok, frame = cap.read()
-                if not ok:
-                    break
-
-                results = model.predict(frame, conf=conf, verbose=False)[0]
-                annotated_bgr = results.plot()
-
-                frame_placeholder.image(annotated_bgr, channels="BGR", use_container_width=True)
-                processed += 1
-
-                if total_frames:
-                    progress_bar.progress(min(processed / total_frames, 1.0))
-
-                info_placeholder.markdown(
-                    f"**Frames processed:** {processed} / {total_frames if total_frames else 'unknown'}"
-                    f" · **Confidence:** {conf}"
-                )
-                # 关键：限制帧率，解决画面不动
-                time.sleep(0.033)
-
-            cap.release()
-        st.success("Finished Live Processing √ ")
-        try:
-            os.unlink(input_path)
-        except Exception:
-            pass
+        cap.release()
+        os.remove(temp_path)
+        st.success("处理完毕")
+    elif start and not temp_path:
+        st.warning("先上传视频！")
