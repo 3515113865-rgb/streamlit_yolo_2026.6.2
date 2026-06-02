@@ -1,4 +1,9 @@
 #Import All the Required Libraries
+import os
+os.environ['OPENCV_IO_ENABLE_OPENGL'] = '0'
+os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+import cv2
+
 import cv2
 import tempfile
 import os
